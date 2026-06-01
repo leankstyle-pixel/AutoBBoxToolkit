@@ -1,0 +1,49 @@
+# Build outputs and local packaging
+/build/
+/deploy/
+/runtime/
+/package/
+/backup/
+/archive/
+/project/
+/backup_rebuild/
+
+# Generated Toolkit resource mirrors; keep single sources in /autobbox_msg.txt,
+# /resource/*.res, /text/resource/*.png, and /ribbon/toolkitribbonui.rbn.
+/text/autobbox_msg.txt
+/text/toolkitribbonui.rbn
+/text/chinese_cn/
+/text/usascii/
+/text/resource/*.res
+
+# Local logs and temp files
+*.log
+*.bak
+*.tmp
+/autobbox_report.txt
+
+# Local Creo TOOLKIT headers (junction for CodeGraph)
+/include/creo_tk/
+
+# Local scratch capture
+/1567f1a2-8705-4b68-a600-4951d45b3e6d.png
+
+# Local agent/index/cache data; do not publish generated Creo install indexes.
+/.claude/
+/.codegraph/
+/.autobbox/
+/.mcp.json
+/memory.md
+/creo-protoolkit.skill
+
+# Generated/internal documentation artifacts.
+/docs/api_extracts/
+/docs/AutoBBoxToolkit_DevSpec.docx
+/docs/AutoBBoxToolkit_Features.xlsx
+/docs/CREO_*.md
+/docs/plugin_icons_preview.png
+/docs/ui_sample_board*.png
+
+# Python cache
+__pycache__/
+*.py[cod]
