@@ -1,4 +1,4 @@
-﻿# AutoBBoxToolkit
+# AutoBBoxToolkit
 
 AutoBBoxToolkit is a recovered and reorganized Creo TOOLKIT plug-in workspace. It provides Creo automation commands for model bounding-box parameters, volume data, drawing view helpers, BOM/parameter tooling, family table workflows, quick rename, sheet-metal flattening helpers, and related productivity features.
 
@@ -13,16 +13,16 @@ See also:
 
 ## Layout
 
-- `src/main` 鈥?plug-in bootstrap, command registration, and command dispatch
-- `src/application` 鈥?feature workflows and business logic
-- `src/creo` 鈥?Creo TOOLKIT-facing helper wrappers
-- `src/ui` 鈥?native Creo dialog/controller logic
-- `src/common` 鈥?logging, path, string, and shared utility helpers
-- `include/autobbox` 鈥?public/internal project headers
-- `resource` 鈥?source `.res` dialog resource files
-- `ribbon` 鈥?source ribbon definition
-- `text/resource` 鈥?ribbon icon/image resources
-- `scripts` 鈥?local build and index helper scripts
+- `src/main` - plug-in bootstrap, command registration, and command dispatch
+- `src/application` - feature workflows and business logic
+- `src/creo` - Creo TOOLKIT-facing helper wrappers
+- `src/ui` - native Creo dialog/controller logic
+- `src/common` - logging, path, string, and shared utility helpers
+- `include/autobbox` - public/internal project headers
+- `resource` - source `.res` dialog resource files
+- `ribbon` - source ribbon definition
+- `text/resource` - ribbon icon/image resources
+- `scripts` - local build and index helper scripts
 
 Generated runtime outputs such as `build/`, `deploy/`, `runtime/`, and `package/` are intentionally ignored by git.
 
@@ -67,4 +67,3 @@ This project is licensed under the MIT License. See LICENSE for details.
 ## Disclaimer
 
 AutoBBoxToolkit is an independent community project. It is not affiliated with, endorsed by, or sponsored by PTC. Creo and Creo TOOLKIT are trademarks or registered trademarks of their respective owners.
-
