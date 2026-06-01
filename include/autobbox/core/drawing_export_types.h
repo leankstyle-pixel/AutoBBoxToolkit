@@ -27,6 +27,7 @@ struct DrawingExportSheetChoice {
 struct DrawingExportRequest {
     DrawingExportFormat format = DrawingExportFormat::Pdf;
     DwgExportMode dwg_mode = DwgExportMode::PerSheetFiles;
+    bool enable_official_color_mapping = false;
     int selected_sheet = 1;
     std::vector<int> selected_sheets;
 };

@@ -43,6 +43,171 @@ void LogLine(const DrawingExportLogSink &log_sink, const char *fmt, ...)
     log_sink(buffer);
 }
 
+ProError CopyWideToFixed(const wchar_t *text, wchar_t *out, size_t out_size)
+{
+    if (text == nullptr || out == nullptr || out_size == 0 || std::wcslen(text) >= out_size) {
+        return PRO_TK_BAD_INPUTS;
+    }
+#if defined(_MSC_VER)
+    wcsncpy_s(out, out_size, text, _TRUNCATE);
+#else
+    std::wcsncpy(out, text, out_size - 1);
+    out[out_size - 1] = L'\0';
+#endif
+    return PRO_TK_NO_ERROR;
+}
+
+bool WriteNoDxfDwgMappingFile(const std::wstring &path, const DrawingExportLogSink &log_sink)
+{
+    if (path.empty()) {
+        return false;
+    }
+
+    HANDLE file = CreateFileW(
+        path.c_str(),
+        GENERIC_WRITE,
+        0,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        LogLine(log_sink,
+                "drawing-export dxf-map no-map-file-create failed win32=%lu path=%s",
+                static_cast<unsigned long>(GetLastError()),
+                autobbox::common::WToA(path.c_str()).c_str());
+        return false;
+    }
+
+    const char content[] =
+        "! AutoBBox temporary DXF/DWG export mapping file.\r\n"
+        "! Intentionally contains no map_color/map_layer/map_line_style entries.\r\n";
+    DWORD written = 0;
+    const BOOL ok = WriteFile(file, content, static_cast<DWORD>(sizeof(content) - 1), &written, nullptr);
+    const DWORD write_error = ok ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(file);
+    if (!ok) {
+        DeleteFileW(path.c_str());
+        LogLine(log_sink,
+                "drawing-export dxf-map no-map-file-write failed win32=%lu path=%s",
+                static_cast<unsigned long>(write_error),
+                autobbox::common::WToA(path.c_str()).c_str());
+        return false;
+    }
+    return true;
+}
+
+struct ScopedDxfDwgMappingOption {
+    ScopedDxfDwgMappingOption(bool apply_option,
+                              bool enable_mapping,
+                              const std::wstring &no_mapping_file_path,
+                              const DrawingExportLogSink &log_sink)
+        : log_sink(log_sink)
+    {
+        if (!apply_option) {
+            return;
+        }
+
+        ProName option = {0};
+        ProError st_option = CopyWideToFixed(kOptionName, option, PRO_NAME_SIZE);
+        if (st_option != PRO_TK_NO_ERROR) {
+            LogLine(log_sink, "drawing-export dxf-map option-name-invalid status=%d", static_cast<int>(st_option));
+            return;
+        }
+
+        ProError st_get = ProConfigoptionGet(option, original_value);
+        original_captured = (st_get == PRO_TK_NO_ERROR || st_get == PRO_TK_LINE_TOO_LONG);
+        if (st_get == PRO_TK_LINE_TOO_LONG) {
+            LogLine(log_sink, "drawing-export dxf-map original-truncated");
+        }
+
+        if (!enable_mapping && !original_captured) {
+            LogLine(log_sink,
+                    "drawing-export dxf-map requested=0 get_status=%d original_captured=0 action=already-unset",
+                    static_cast<int>(st_get));
+            return;
+        }
+
+        if (!enable_mapping) {
+            if (!WriteNoDxfDwgMappingFile(no_mapping_file_path, log_sink)) {
+                return;
+            }
+            no_mapping_file = no_mapping_file_path;
+        }
+
+        const wchar_t *target_value = enable_mapping ? kOfficialMappingPath : no_mapping_file.c_str();
+        if (enable_mapping && !autobbox::common::FileExistsW(kOfficialMappingPath)) {
+            LogLine(log_sink,
+                    "drawing-export dxf-map official-file-missing path=%s",
+                    autobbox::common::WToA(kOfficialMappingPath).c_str());
+            return;
+        }
+
+        ProPath target = {0};
+        ProError st_value = CopyWideToFixed(target_value, target, PRO_PATH_SIZE);
+        if (st_value != PRO_TK_NO_ERROR) {
+            LogLine(log_sink, "drawing-export dxf-map target-invalid status=%d", static_cast<int>(st_value));
+            return;
+        }
+
+        const ProError st_set = ProConfigoptSet(option, target);
+        active = (st_set == PRO_TK_NO_ERROR);
+        LogLine(log_sink,
+                "drawing-export dxf-map requested=%d get_status=%d set_status=%d original_captured=%d target=%s mode=%s",
+                enable_mapping ? 1 : 0,
+                static_cast<int>(st_get),
+                static_cast<int>(st_set),
+                original_captured ? 1 : 0,
+                autobbox::common::WToA(target_value).c_str(),
+                enable_mapping ? "official" : "no-map");
+    }
+
+    ~ScopedDxfDwgMappingOption()
+    {
+        if (!active) {
+            return;
+        }
+
+        ProName option = {0};
+        ProError st_option = CopyWideToFixed(kOptionName, option, PRO_NAME_SIZE);
+        ProPath restore_value = {0};
+        ProError st_value = PRO_TK_NO_ERROR;
+        if (st_option == PRO_TK_NO_ERROR) {
+            st_value = original_captured
+                           ? CopyWideToFixed(original_value, restore_value, PRO_PATH_SIZE)
+                           : CopyWideToFixed(L"", restore_value, PRO_PATH_SIZE);
+        }
+        ProError st_restore = PRO_TK_GENERAL_ERROR;
+        if (st_option == PRO_TK_NO_ERROR && st_value == PRO_TK_NO_ERROR) {
+            st_restore = ProConfigoptSet(option, restore_value);
+        }
+
+        LogLine(log_sink,
+                "drawing-export dxf-map restore original_captured=%d option_status=%d value_status=%d restore_status=%d",
+                original_captured ? 1 : 0,
+                static_cast<int>(st_option),
+                static_cast<int>(st_value),
+                static_cast<int>(st_restore));
+        if (!no_mapping_file.empty()) {
+            const BOOL deleted = DeleteFileW(no_mapping_file.c_str());
+            LogLine(log_sink,
+                    "drawing-export dxf-map no-map-file-delete deleted=%d path=%s",
+                    deleted ? 1 : 0,
+                    autobbox::common::WToA(no_mapping_file.c_str()).c_str());
+        }
+    }
+
+    static constexpr const wchar_t *kOptionName = L"intf2d_out_dxf_mapping_file";
+    static constexpr const wchar_t *kOfficialMappingPath =
+        L"D:\\Program Files\\PTC\\Creo 10.0.8.0\\Common Files\\text\\intf_configs\\dxf_export.pro";
+
+    const DrawingExportLogSink &log_sink;
+    bool active = false;
+    bool original_captured = false;
+    ProPath original_value = {0};
+    std::wstring no_mapping_file;
+};
+
 bool IsInvalidFileNameChar(wchar_t ch)
 {
     if (ch < 32) {
@@ -733,12 +898,22 @@ core::DrawingExportResult ExecuteDrawingExportTask(
     const std::wstring drawing_stem =
         SanitizeFileStem(autobbox::creo::ModelName(drawing_model, L"drawing"), L"drawing");
     LogLine(log_sink,
-            "drawing-export begin format=%s dwg_mode=%d drawing=%s sheets=%d dir=%s",
+            "drawing-export begin format=%s dwg_mode=%d color_map=%d drawing=%s sheets=%d dir=%s",
             DrawingExportFormatLogName(request.format),
             static_cast<int>(request.dwg_mode),
+            request.enable_official_color_mapping ? 1 : 0,
             autobbox::common::WToA(drawing_stem.c_str()).c_str(),
             sheets,
             autobbox::common::WToA(result.output_dir.c_str()).c_str());
+
+    const bool dxf_dwg_mapping_applicable =
+        request.format == core::DrawingExportFormat::Dwg ||
+        request.format == core::DrawingExportFormat::Dxf;
+    ScopedDxfDwgMappingOption dxf_dwg_mapping_option(
+        dxf_dwg_mapping_applicable,
+        request.enable_official_color_mapping,
+        UniqueOutputPath(result.output_dir, drawing_stem + L"_no_dxf_dwg_mapping", L".pro"),
+        log_sink);
 
     if (request.format == core::DrawingExportFormat::Pdf) {
         const std::wstring path =

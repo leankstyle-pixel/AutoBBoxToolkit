@@ -4,6 +4,7 @@
 #include "autobbox/common/strings.h"
 #include "autobbox/ui/message_dialog.h"
 
+#include <ProUICheckbutton.h>
 #include <ProUIDialog.h>
 #include <ProUILabel.h>
 #include <ProUIList.h>
@@ -31,6 +32,7 @@ struct DrawingExportDialogConfig {
     const char *format_group_comp = nullptr;
     const char *dwg_mode_label_comp = nullptr;
     const char *dwg_mode_group_comp = nullptr;
+    const char *official_color_map_check_comp = nullptr;
     const char *sheet_label_comp = nullptr;
     const char *sheet_list_comp = nullptr;
     const char *output_label_comp = nullptr;
@@ -49,6 +51,7 @@ DrawingExportDialogConfig DefaultConfig()
     config.format_group_comp = "FormatGroup";
     config.dwg_mode_label_comp = "DwgModeLabel";
     config.dwg_mode_group_comp = "DwgModeGroup";
+    config.official_color_map_check_comp = "OfficialColorMapCheck";
     config.sheet_label_comp = "SheetLabel";
     config.sheet_list_comp = "SheetList";
     config.output_label_comp = "OutputLabel";
@@ -201,6 +204,30 @@ void OnSheetSelect(char *dialog, char *, ProAppData app_data)
     if (names != nullptr) {
         ProStringarrayFree(names, count);
     }
+}
+
+void SetCheckState(char *dialog, const char *component, bool checked)
+{
+    if (dialog == nullptr || component == nullptr) {
+        return;
+    }
+    if (checked) {
+        ProUICheckbuttonSet(dialog, const_cast<char *>(component));
+    } else {
+        ProUICheckbuttonUnset(dialog, const_cast<char *>(component));
+    }
+}
+
+bool GetCheckState(char *dialog, const char *component, bool fallback)
+{
+    if (dialog == nullptr || component == nullptr) {
+        return fallback;
+    }
+    ProBoolean checked = PRO_B_FALSE;
+    if (ProUICheckbuttonGetState(dialog, const_cast<char *>(component), &checked) != PRO_TK_NO_ERROR) {
+        return fallback;
+    }
+    return checked == PRO_B_TRUE;
 }
 
 ProError TryCreateDialog(const DrawingExportDialogConfig &config,
@@ -414,6 +441,10 @@ void SetDialogChineseText(char *dialog, const DrawingExportDialogConfig &config)
         const_cast<char *>(config.output_label_comp),
         const_cast<wchar_t *>(
             L"\u8f93\u51fa\u5230\u5f53\u524d\u5de5\u4f5c\u76ee\u5f55\u7684 export \u6587\u4ef6\u5939\u3002"));
+    ProUICheckbuttonTextSet(
+        dialog,
+        const_cast<char *>(config.official_color_map_check_comp),
+        const_cast<wchar_t *>(L"\u542f\u7528 DXF/DWG \u5b98\u65b9\u989c\u8272\u6620\u5c04"));
     ProUIPushbuttonTextSet(
         dialog,
         const_cast<char *>(config.cancel_comp),
@@ -503,6 +534,10 @@ bool PromptDrawingExportOptions(core::DrawingExportRequest &request,
         dwg_mode_names,
         dwg_mode_labels,
         selected_dwg_mode);
+    SetCheckState(
+        const_cast<char *>(config.dialog_inst_name),
+        config.official_color_map_check_comp,
+        request.enable_official_color_mapping);
     SetSheetList(const_cast<char *>(config.dialog_inst_name), config, state);
     SetDialogChineseText(const_cast<char *>(config.dialog_inst_name), config);
 
@@ -556,12 +591,17 @@ bool PromptDrawingExportOptions(core::DrawingExportRequest &request,
     }
 
     ReadSheetListState(const_cast<char *>(config.dialog_inst_name), config, state);
+    state.request.enable_official_color_mapping = GetCheckState(
+        const_cast<char *>(config.dialog_inst_name),
+        config.official_color_map_check_comp,
+        state.request.enable_official_color_mapping);
     request = state.request;
     ProUIDialogDestroy(const_cast<char *>(config.dialog_inst_name));
     LogLine(log_sink,
-            "drawing-export-dialog selected format=%d dwg_mode=%d selected_sheet=%d selected_count=%d",
+            "drawing-export-dialog selected format=%d dwg_mode=%d color_map=%d selected_sheet=%d selected_count=%d",
             static_cast<int>(request.format),
             static_cast<int>(request.dwg_mode),
+            request.enable_official_color_mapping ? 1 : 0,
             request.selected_sheet,
             static_cast<int>(request.selected_sheets.size()));
     return true;

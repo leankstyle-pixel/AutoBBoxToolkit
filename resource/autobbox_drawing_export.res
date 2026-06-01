@@ -27,6 +27,7 @@
         (Label                          SheetLabel)
         (List                           SheetList)
         (Label                          OutputLabel)
+        (CheckButton                    OfficialColorMapCheck)
         (SubLayout                      FooterBar)
     )
 
@@ -79,6 +80,13 @@
         (OutputLabel.RightOffset        10)
         (OutputLabel.AttachLeft         True)
         (OutputLabel.AttachRight        True)
+        (OfficialColorMapCheck.Label    "Enable official DXF/DWG color mapping")
+        (OfficialColorMapCheck.TopOffset 4)
+        (OfficialColorMapCheck.BottomOffset 8)
+        (OfficialColorMapCheck.LeftOffset 10)
+        (OfficialColorMapCheck.RightOffset 10)
+        (OfficialColorMapCheck.AttachLeft True)
+        (OfficialColorMapCheck.AttachRight True)
         (FooterBar.TopOffset            4)
         (FooterBar.LeftOffset           6)
         (FooterBar.RightOffset          6)
@@ -91,7 +99,7 @@
         (.AttachTop                     True)
         (.AttachBottom                  True)
         (.Layout
-            (Grid (Rows 0 0 0 0 0 0 0 0) (Cols 1)
+            (Grid (Rows 0 0 0 0 0 0 0 0 0) (Cols 1)
                 PromptLabel
                 FormatGroup
                 DwgModeLabel
@@ -99,6 +107,7 @@
                 SheetLabel
                 SheetList
                 OutputLabel
+                OfficialColorMapCheck
                 FooterBar
             )
         )
