@@ -48,6 +48,7 @@
 #include "autobbox/core/split_types.h"
 #include "autobbox/common/strings.h"
 #include "autobbox/main/command_registry.h"
+#include "autobbox/main/afx_library_dialog_hook.h"
 #include "autobbox/main/open_perf_trace.h"
 #include "autobbox/main/plugin_balloon_arrange.h"
 #include "autobbox/main/plugin_command_callbacks.h"
@@ -440,11 +441,15 @@ extern "C" int __declspec(dllexport) user_initialize(
         kEnableCmdIcons,
         kEnableOpenPerfNotifications,
         err_buff);
+    if (st == PRO_TK_NO_ERROR) {
+        autobbox::main::StartAfxLibraryDialogHook(g_plugin_entry_state.startup_log);
+    }
     return st;
 }
 
 extern "C" void __declspec(dllexport) user_terminate(void)
 {
+    autobbox::main::StopAfxLibraryDialogHook();
     autobbox::main::PluginEntryCallbacks callbacks = {};
     const autobbox::main::PluginPerfCallbacks perf_callbacks = BuildPerfCallbacks();
     callbacks.unregister_perf_notifications = perf_callbacks.unregister_perf_notifications;

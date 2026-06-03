@@ -5,6 +5,7 @@ set(CREO_TOOLKIT_ROOT "D:/Program Files/PTC/Creo 10.0.8.0/Common Files/protoolki
 
 set(CREO_TK_INC "${CREO_TOOLKIT_ROOT}/includes")
 set(CREO_TK_LIBDIR "${CREO_TOOLKIT_ROOT}/x86e_win64/obj")
+set(CREO_REALDWG_DIR "D:/Program Files/PTC/Creo 10.0.8.0/Common Files/applications/REALDWG" CACHE PATH "Creo bundled RealDWG runtime")
 
 if(NOT EXISTS "${CREO_TK_INC}/ProToolkit.h")
   message(FATAL_ERROR "Creo TOOLKIT headers not found: ${CREO_TK_INC}")
@@ -12,6 +13,24 @@ endif()
 
 if(NOT EXISTS "${CREO_TK_LIBDIR}/protk_dllmd_NU.lib")
   message(FATAL_ERROR "Creo TOOLKIT lib not found: ${CREO_TK_LIBDIR}/protk_dllmd_NU.lib")
+endif()
+
+set(DWG_LAYOUT_RENAMER_EXE "${CMAKE_CURRENT_SOURCE_DIR}/deploy/AutoBBoxToolkit/AutobboxDwgLayoutRenamer_v2.exe")
+set(DWG_LAYOUT_RENAMER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/tools/dwg_layout_renamer/AutobboxDwgLayoutRenamer.cs")
+set(DWG_LAYOUT_RENAMER_CSC "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe")
+if(EXISTS "${DWG_LAYOUT_RENAMER_CSC}" AND EXISTS "${CREO_REALDWG_DIR}/acdbmgd.dll")
+  add_custom_command(
+    OUTPUT "${DWG_LAYOUT_RENAMER_EXE}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<SHELL_PATH:${CMAKE_CURRENT_SOURCE_DIR}/deploy/AutoBBoxToolkit>"
+    COMMAND "${DWG_LAYOUT_RENAMER_CSC}" /nologo /platform:x64 /target:exe
+            "/out:$<SHELL_PATH:${DWG_LAYOUT_RENAMER_EXE}>"
+            "/reference:$<SHELL_PATH:${CREO_REALDWG_DIR}/acdbmgd.dll>"
+            "$<SHELL_PATH:${DWG_LAYOUT_RENAMER_SRC}>"
+    DEPENDS "${DWG_LAYOUT_RENAMER_SRC}"
+    VERBATIM)
+  add_custom_target(dwg_layout_renamer ALL DEPENDS "${DWG_LAYOUT_RENAMER_EXE}")
+else()
+  message(WARNING "DWG layout renamer helper will not be built: missing csc.exe or RealDWG acdbmgd.dll")
 endif()
 
 add_library(autobbox_toolkit SHARED
@@ -33,6 +52,7 @@ add_library(autobbox_toolkit SHARED
   src/application/drawing3_views.cpp
   src/application/force_open_drawing.cpp
   src/application/feature_visibility.cpp
+  src/application/afx_library_search.cpp
   src/application/drawing_view_layout.cpp
   src/application/model_metrics.cpp
   src/application/model_diagnostics.cpp
@@ -70,6 +90,7 @@ add_library(autobbox_toolkit SHARED
   src/creo/model_info.cpp
   src/creo/parameter_api.cpp
   src/main/command_registry.cpp
+  src/main/afx_library_dialog_hook.cpp
   src/main/open_perf_trace.cpp
   src/main/plugin_balloon_arrange.cpp
   src/main/plugin_batch_rename.cpp
@@ -102,6 +123,7 @@ add_library(autobbox_toolkit SHARED
   src/ui/delete_params_dialog.cpp
   src/ui/drawing_arrange_dialog.cpp
   src/ui/drawing_export_dialog.cpp
+  src/ui/drawing_scale_sync_dialog.cpp
   src/ui/drawing_view_brush_dialog.cpp
   src/ui/drawing3_dialog.cpp
   src/ui/message_dialog.cpp
@@ -157,4 +179,8 @@ set_target_properties(autobbox_toolkit PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_CURRENT_SOURCE_DIR}/deploy/AutoBBoxToolkit/RelWithDebInfo"
   LIBRARY_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_CURRENT_SOURCE_DIR}/deploy/AutoBBoxToolkit/MinSizeRel"
 )
+
+if(TARGET dwg_layout_renamer)
+  add_dependencies(autobbox_toolkit dwg_layout_renamer)
+endif()
 

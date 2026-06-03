@@ -54,6 +54,36 @@ The project-specific build helper is:
 powershell -ExecutionPolicy Bypass -File .\scripts\build_autobbox.ps1
 ```
 
+## Optional AFX library search hook
+
+The AFX "Select From Library" dialog can be extended with a search input by
+patching the installed AFX dialog resource. Typing filters/selects matching
+library items, and Enter or the Next button cycles through additional matches:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\patch_afx_library_search.ps1
+```
+
+By default the script patches the standalone AFX installation at
+`D:\Program Files\buw\AFX 10.0.8.0\text\resource`. Pass `-AfxResourceRoot` only
+if a different AFX resource directory should be patched.
+
+The script backs up the original files as `*.autobbox-search-backup`. To undo
+the resource change:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\restore_afx_library_search.ps1
+```
+
+## DWG export font handling
+
+DWG post-processing reads the current drawing setup/detail options loaded from
+the user's `drawing.dtl`, preferring `default_annotation_font` and then
+`default_font`. When Creo's internal stroke font values such as `font` or
+`font.ndx` are encountered, AutoBBox writes DWG text styles with
+`ChangFangSong.ttf` instead so exported DWGs keep a consistent long Fangsong
+font.
+
 ## Notes for maintainers
 
 - Do not commit local Creo SDK headers, libraries, generated install indexes, DLLs, PDBs, or runtime deployment mirrors.

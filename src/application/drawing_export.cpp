@@ -6,6 +6,7 @@
 
 #include <ProArray.h>
 #include <ProDrawing.h>
+#include <ProDwgtable.h>
 #include <ProMdl.h>
 #include <ProPDF.h>
 #include <ProPrint.h>
@@ -21,8 +22,10 @@
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
+#include <cwctype>
 #include <cwchar>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace autobbox::application {
@@ -207,6 +210,11 @@ struct ScopedDxfDwgMappingOption {
     ProPath original_value = {0};
     std::wstring no_mapping_file;
 };
+
+bool IsNoErrorOrNoChange(ProError st)
+{
+    return st == PRO_TK_NO_ERROR || st == PRO_TK_NO_CHANGE;
+}
 
 bool IsInvalidFileNameChar(wchar_t ch)
 {
@@ -397,11 +405,503 @@ std::wstring SheetStem(ProDrawing drawing, int sheet)
     return fallback;
 }
 
+std::wstring SheetLayoutName(ProDrawing drawing, int sheet)
+{
+    ProName name = {0};
+    if (drawing != nullptr &&
+        ProDrawingSheetNameGet(drawing, sheet, name) == PRO_TK_NO_ERROR &&
+        name[0] != L'\0') {
+        return name;
+    }
+
+    wchar_t fallback[32] = {0};
+    std::swprintf(fallback, sizeof(fallback) / sizeof(fallback[0]), L"sheet%02d", sheet);
+    return fallback;
+}
+
 std::wstring JoinDrawingSheetStem(const std::wstring &drawing_stem,
                                   ProDrawing drawing,
                                   int sheet)
 {
     return SanitizeFileStem(drawing_stem + L"_" + SheetStem(drawing, sheet), L"drawing_sheet");
+}
+
+struct DwgLayoutSheetName {
+    int sheet = 0;
+    std::wstring name;
+    std::wstring original_name;
+};
+
+constexpr wchar_t kFallbackDwgFontFile[] = L"ChangFangSong.ttf";
+
+struct DwgFontSetting {
+    std::wstring font_file;
+    std::string source;
+    ProError status = PRO_TK_GENERAL_ERROR;
+};
+
+std::wstring LowerWide(std::wstring value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](wchar_t ch) {
+        return static_cast<wchar_t>(std::towlower(ch));
+    });
+    return value;
+}
+
+std::wstring TrimWhitespace(std::wstring text)
+{
+    const auto is_ws = [](wchar_t ch) {
+        return ch == L' ' || ch == L'\t' || ch == L'\r' || ch == L'\n';
+    };
+    while (!text.empty() && is_ws(text.front())) {
+        text.erase(text.begin());
+    }
+    while (!text.empty() && is_ws(text.back())) {
+        text.pop_back();
+    }
+    if (text.size() >= 2 &&
+        ((text.front() == L'"' && text.back() == L'"') ||
+         (text.front() == L'\'' && text.back() == L'\''))) {
+        text = text.substr(1, text.size() - 2);
+    }
+    return text;
+}
+
+std::wstring FileExtensionLower(const std::wstring &path)
+{
+    const size_t slash = path.find_last_of(L"\\/");
+    const size_t dot = path.find_last_of(L'.');
+    if (dot == std::wstring::npos || (slash != std::wstring::npos && dot < slash)) {
+        return L"";
+    }
+    return LowerWide(path.substr(dot));
+}
+
+bool IsCreoDefaultStrokeFontValue(const std::wstring &value)
+{
+    const std::wstring lower = LowerWide(TrimWhitespace(value));
+    return lower == L"font" || lower == L"isofont" || lower == L"font.ndx" || lower == L"isofont.ndx";
+}
+
+std::wstring NormalizeDwgFontFileFromDrawingDtlValue(const std::wstring &value, std::string &normalization)
+{
+    normalization.clear();
+    const std::wstring trimmed = TrimWhitespace(value);
+    if (trimmed.empty()) {
+        return L"";
+    }
+
+    const std::wstring lower = LowerWide(trimmed);
+    if (lower == L"changfangsong" || trimmed == L"\x957f\x4eff\x5b8b") {
+        normalization = "append-ttf";
+        return kFallbackDwgFontFile;
+    }
+
+    if (IsCreoDefaultStrokeFontValue(trimmed)) {
+        normalization = "creo-stroke-font-fallback";
+        return kFallbackDwgFontFile;
+    }
+
+    const std::wstring ext = FileExtensionLower(trimmed);
+    if (ext == L".ndx") {
+        normalization = "creo-font-index-fallback";
+        return kFallbackDwgFontFile;
+    }
+
+    return trimmed;
+}
+
+ProError DrawingSetupOptionGet(ProDrawing drawing, const wchar_t *option_name, std::wstring &value)
+{
+    value.clear();
+    if (drawing == nullptr || option_name == nullptr) {
+        return PRO_TK_BAD_INPUTS;
+    }
+
+    ProName option = {0};
+    ProError st = CopyWideToFixed(option_name, option, PRO_NAME_SIZE);
+    if (st != PRO_TK_NO_ERROR) {
+        return st;
+    }
+
+    ProLine raw = {0};
+    st = ProDrawingSetupOptionGet(drawing, option, raw);
+    if (st == PRO_TK_NO_ERROR && raw[0] != L'\0') {
+        value = TrimWhitespace(raw);
+    }
+    return st;
+}
+
+ProError ModelDetailOptionGet(ProMdl drawing_model, const wchar_t *option_name, std::wstring &value)
+{
+    value.clear();
+    if (drawing_model == nullptr || option_name == nullptr) {
+        return PRO_TK_BAD_INPUTS;
+    }
+
+    ProName option = {0};
+    ProError st = CopyWideToFixed(option_name, option, PRO_NAME_SIZE);
+    if (st != PRO_TK_NO_ERROR) {
+        return st;
+    }
+
+    ProLine raw = {0};
+    st = ProMdlDetailOptionGet(drawing_model, option, raw);
+    if (st == PRO_TK_NO_ERROR && raw[0] != L'\0') {
+        value = TrimWhitespace(raw);
+    }
+    return st;
+}
+
+DwgFontSetting ResolveDwgFontFromDrawingDtl(ProDrawing drawing,
+                                            ProMdl drawing_model,
+                                            const DrawingExportLogSink &log_sink)
+{
+    static constexpr const wchar_t *kDetailFontOptions[] = {
+        L"default_annotation_font",
+        L"default_font",
+    };
+
+    for (const wchar_t *option_name : kDetailFontOptions) {
+        struct Getter {
+            const char *api_name;
+            ProError (*get)(ProDrawing, ProMdl, const wchar_t *, std::wstring &);
+        };
+        static const Getter kGetters[] = {
+            {"ProDrawingSetupOptionGet",
+             [](ProDrawing drw, ProMdl, const wchar_t *name, std::wstring &out) {
+                 return DrawingSetupOptionGet(drw, name, out);
+             }},
+            {"ProMdlDetailOptionGet",
+             [](ProDrawing, ProMdl mdl, const wchar_t *name, std::wstring &out) {
+                 return ModelDetailOptionGet(mdl, name, out);
+             }},
+        };
+
+        for (const Getter &getter : kGetters) {
+            std::wstring value;
+            const ProError st = getter.get(drawing, drawing_model, option_name, value);
+            std::string normalization;
+            std::wstring font_file = NormalizeDwgFontFileFromDrawingDtlValue(value, normalization);
+            LogLine(log_sink,
+                    "drawing-export dwg-font detail-option api=%s option=%s status=%d value=%s normalized=%s normalization=%s",
+                    getter.api_name,
+                    autobbox::common::WToA(option_name).c_str(),
+                    static_cast<int>(st),
+                    autobbox::common::WToA(value.c_str()).c_str(),
+                    autobbox::common::WToA(font_file.c_str()).c_str(),
+                    normalization.empty() ? "none" : normalization.c_str());
+            if (st == PRO_TK_NO_ERROR && !font_file.empty()) {
+                std::string source = "drawing.dtl:";
+                source += getter.api_name;
+                source += ":";
+                source += autobbox::common::WToA(option_name);
+                if (!normalization.empty()) {
+                    source += ":";
+                    source += normalization;
+                }
+                return {font_file, source, st};
+            }
+        }
+    }
+
+    return {kFallbackDwgFontFile, "fallback:ChangFangSong.ttf", PRO_TK_E_NOT_FOUND};
+}
+
+std::vector<DwgLayoutSheetName> CollectDwgLayoutSheetNames(ProDrawing drawing,
+                                                           const std::vector<int> &sheets,
+                                                           const DrawingExportLogSink &log_sink)
+{
+    std::vector<DwgLayoutSheetName> names;
+    names.reserve(sheets.size());
+    for (const int sheet : sheets) {
+        DwgLayoutSheetName item = {};
+        item.sheet = sheet;
+        ProName original = {0};
+        const ProError st_get = drawing != nullptr
+                                    ? ProDrawingSheetNameGet(drawing, sheet, original)
+                                    : PRO_TK_BAD_INPUTS;
+        if (st_get == PRO_TK_NO_ERROR && original[0] != L'\0') {
+            item.original_name = original;
+            item.name = original;
+        } else {
+            item.name = SheetLayoutName(drawing, sheet);
+        }
+        names.push_back(item);
+        LogLine(log_sink,
+                "drawing-export dwg-layout-name sheet=%d get_status=%d name=%s source=%s",
+                sheet,
+                static_cast<int>(st_get),
+                autobbox::common::WToA(item.name.c_str()).c_str(),
+                item.original_name.empty() ? "fallback" : "creo-sheet-name");
+    }
+    return names;
+}
+
+std::vector<std::wstring> ExtractLayoutTargetNames(const std::vector<DwgLayoutSheetName> &layout_names)
+{
+    std::vector<std::wstring> names;
+    names.reserve(layout_names.size());
+    for (const DwgLayoutSheetName &item : layout_names) {
+        names.push_back(item.name);
+    }
+    return names;
+}
+
+class ScopedDwgLayoutSheetNames {
+public:
+    ScopedDwgLayoutSheetNames(ProDrawing drawing,
+                              std::vector<DwgLayoutSheetName> names,
+                              const DrawingExportLogSink &log_sink)
+        : drawing_(drawing), names_(std::move(names)), log_sink_(log_sink)
+    {
+    }
+
+    ProError Apply()
+    {
+        if (drawing_ == nullptr) {
+            return PRO_TK_BAD_INPUTS;
+        }
+        active_ = true;
+        ProError first_error = PRO_TK_NO_ERROR;
+        for (const DwgLayoutSheetName &item : names_) {
+            ProName pro_name = {0};
+            ProError st_copy = CopyWideToFixed(item.name.c_str(), pro_name, PRO_NAME_SIZE);
+            ProError st_set = PRO_TK_BAD_INPUTS;
+            if (st_copy == PRO_TK_NO_ERROR) {
+                st_set = ProDrawingSheetNameSet(drawing_, item.sheet, pro_name);
+            }
+            LogLine(log_sink_,
+                    "drawing-export dwg-layout-name-apply sheet=%d copy_status=%d set_status=%d name=%s",
+                    item.sheet,
+                    static_cast<int>(st_copy),
+                    static_cast<int>(st_set),
+                    autobbox::common::WToA(item.name.c_str()).c_str());
+            if (first_error == PRO_TK_NO_ERROR) {
+                if (st_copy != PRO_TK_NO_ERROR) {
+                    first_error = st_copy;
+                } else if (!IsNoErrorOrNoChange(st_set)) {
+                    first_error = st_set;
+                }
+            }
+        }
+        return first_error;
+    }
+
+    ~ScopedDwgLayoutSheetNames()
+    {
+        if (!active_ || drawing_ == nullptr) {
+            return;
+        }
+        for (const DwgLayoutSheetName &item : names_) {
+            ProName restore = {0};
+            const std::wstring &restore_name = item.original_name;
+            ProError st_copy = CopyWideToFixed(restore_name.c_str(), restore, PRO_NAME_SIZE);
+            ProError st_set = PRO_TK_BAD_INPUTS;
+            if (st_copy == PRO_TK_NO_ERROR) {
+                st_set = ProDrawingSheetNameSet(drawing_, item.sheet, restore);
+            }
+            LogLine(log_sink_,
+                    "drawing-export dwg-layout-name-restore sheet=%d copy_status=%d set_status=%d name=%s",
+                    item.sheet,
+                    static_cast<int>(st_copy),
+                    static_cast<int>(st_set),
+                    autobbox::common::WToA(restore_name.c_str()).c_str());
+        }
+    }
+
+private:
+    ProDrawing drawing_ = nullptr;
+    std::vector<DwgLayoutSheetName> names_;
+    const DrawingExportLogSink &log_sink_;
+    bool active_ = false;
+};
+
+std::wstring CurrentModuleDirectory()
+{
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&CurrentModuleDirectory),
+            &module) ||
+        module == nullptr) {
+        return std::wstring();
+    }
+
+    wchar_t path[MAX_PATH] = {0};
+    const DWORD len = GetModuleFileNameW(module, path, static_cast<DWORD>(sizeof(path) / sizeof(path[0])));
+    if (len == 0 || len >= sizeof(path) / sizeof(path[0])) {
+        return std::wstring();
+    }
+    return ParentDirectory(path);
+}
+
+std::wstring QuoteCommandLineArg(const std::wstring &arg)
+{
+    std::wstring out = L"\"";
+    for (const wchar_t ch : arg) {
+        if (ch == L'"') {
+            out += L"\\\"";
+        } else {
+            out += ch;
+        }
+    }
+    out += L"\"";
+    return out;
+}
+
+ProError WriteUtf8LayoutNamesFile(const std::wstring &path,
+                                  const std::vector<std::wstring> &names,
+                                  const DrawingExportLogSink &log_sink)
+{
+    HANDLE file = CreateFileW(
+        path.c_str(),
+        GENERIC_WRITE,
+        0,
+        nullptr,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_TEMPORARY | FILE_ATTRIBUTE_NOT_CONTENT_INDEXED,
+        nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        LogLine(log_sink,
+                "drawing-export dwg-layout-rename names-file-create failed win32=%lu path=%s",
+                static_cast<unsigned long>(GetLastError()),
+                autobbox::common::WToA(path.c_str()).c_str());
+        return PRO_TK_CANT_WRITE;
+    }
+
+    ProError status = PRO_TK_NO_ERROR;
+    for (std::wstring name : names) {
+        std::replace(name.begin(), name.end(), L'\r', L' ');
+        std::replace(name.begin(), name.end(), L'\n', L' ');
+        std::string line = autobbox::common::WideToUtf8(name);
+        line += "\r\n";
+        DWORD written = 0;
+        if (!WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written, nullptr) ||
+            written != line.size()) {
+            status = PRO_TK_CANT_WRITE;
+            break;
+        }
+    }
+    CloseHandle(file);
+    if (status != PRO_TK_NO_ERROR) {
+        DeleteFileW(path.c_str());
+        LogLine(log_sink,
+                "drawing-export dwg-layout-rename names-file-write failed path=%s",
+                autobbox::common::WToA(path.c_str()).c_str());
+    }
+    return status;
+}
+
+ProError EnsureDwgLayoutRenamerInRealDwgDir(std::wstring &renamer_path,
+                                            const DrawingExportLogSink &log_sink)
+{
+    static constexpr const wchar_t *kRealDwgDir =
+        L"D:\\Program Files\\PTC\\Creo 10.0.8.0\\Common Files\\applications\\REALDWG";
+    static constexpr const wchar_t *kRenamerName = L"AutobboxDwgLayoutRenamer_v2.exe";
+
+    renamer_path = autobbox::common::JoinPath(kRealDwgDir, kRenamerName);
+    if (autobbox::common::FileExistsW(renamer_path)) {
+        return PRO_TK_NO_ERROR;
+    }
+
+    const std::wstring module_dir = CurrentModuleDirectory();
+    const std::wstring source = autobbox::common::JoinPath(module_dir, kRenamerName);
+    if (!autobbox::common::FileExistsW(source)) {
+        LogLine(log_sink,
+                "drawing-export dwg-layout-rename helper-missing source=%s",
+                autobbox::common::WToA(source.c_str()).c_str());
+        return PRO_TK_E_NOT_FOUND;
+    }
+
+    if (!CopyFileW(source.c_str(), renamer_path.c_str(), FALSE)) {
+        const DWORD copy_error = GetLastError();
+        LogLine(log_sink,
+                "drawing-export dwg-layout-rename helper-copy failed win32=%lu source=%s target=%s",
+                static_cast<unsigned long>(copy_error),
+                autobbox::common::WToA(source.c_str()).c_str(),
+                autobbox::common::WToA(renamer_path.c_str()).c_str());
+        return autobbox::common::FileExistsW(renamer_path) ? PRO_TK_NO_ERROR : PRO_TK_CANT_WRITE;
+    }
+
+    LogLine(log_sink,
+            "drawing-export dwg-layout-rename helper-copy success source=%s target=%s",
+            autobbox::common::WToA(source.c_str()).c_str(),
+            autobbox::common::WToA(renamer_path.c_str()).c_str());
+    return PRO_TK_NO_ERROR;
+}
+
+ProError RunDwgLayoutRenamer(const std::wstring &dwg_path,
+                             const std::vector<std::wstring> &layout_names,
+                             const std::wstring &output_dir,
+                             const std::wstring &drawing_stem,
+                             const DwgFontSetting &font_setting,
+                             const DrawingExportLogSink &log_sink)
+{
+    if (dwg_path.empty() || layout_names.empty()) {
+        return PRO_TK_BAD_INPUTS;
+    }
+
+    std::wstring renamer;
+    ProError st = EnsureDwgLayoutRenamerInRealDwgDir(renamer, log_sink);
+    if (st != PRO_TK_NO_ERROR) {
+        return st;
+    }
+
+    const std::wstring names_file =
+        UniqueOutputPath(output_dir, drawing_stem + L"_dwg_layout_names", L".txt");
+    st = WriteUtf8LayoutNamesFile(names_file, layout_names, log_sink);
+    if (st != PRO_TK_NO_ERROR) {
+        return st;
+    }
+
+    const std::wstring realdwg_dir = ParentDirectory(renamer);
+    const std::wstring font_file =
+        font_setting.font_file.empty() ? std::wstring(kFallbackDwgFontFile) : font_setting.font_file;
+    std::wstring command_line =
+        QuoteCommandLineArg(renamer) + L" " + QuoteCommandLineArg(dwg_path) + L" " +
+        QuoteCommandLineArg(names_file) + L" " + QuoteCommandLineArg(font_file);
+
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    const BOOL created = CreateProcessW(
+        nullptr,
+        command_line.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NO_WINDOW,
+        nullptr,
+        realdwg_dir.empty() ? nullptr : realdwg_dir.c_str(),
+        &si,
+        &pi);
+    if (!created) {
+        const DWORD create_error = GetLastError();
+        DeleteFileW(names_file.c_str());
+        LogLine(log_sink,
+                "drawing-export dwg-layout-rename process-create failed win32=%lu cmd=%s",
+                static_cast<unsigned long>(create_error),
+                autobbox::common::WToA(command_line.c_str()).c_str());
+        return PRO_TK_GENERAL_ERROR;
+    }
+
+    const DWORD wait = WaitForSingleObject(pi.hProcess, 120000);
+    DWORD exit_code = 259;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    DeleteFileW(names_file.c_str());
+
+    LogLine(log_sink,
+            "drawing-export dwg-layout-rename done wait=%lu exit=%lu layouts=%d font=%s source=%s path=%s",
+            static_cast<unsigned long>(wait),
+            static_cast<unsigned long>(exit_code),
+            static_cast<int>(layout_names.size()),
+            autobbox::common::WToA(font_file.c_str()).c_str(),
+            font_setting.source.c_str(),
+            autobbox::common::WToA(dwg_path.c_str()).c_str());
+    return (wait == WAIT_OBJECT_0 && exit_code == 0) ? PRO_TK_NO_ERROR : PRO_TK_GENERAL_ERROR;
 }
 
 ProError FillSelectedSheetArray(const std::vector<int> &sheets, int **sheets_out)
@@ -897,13 +1397,16 @@ core::DrawingExportResult ExecuteDrawingExportTask(
 
     const std::wstring drawing_stem =
         SanitizeFileStem(autobbox::creo::ModelName(drawing_model, L"drawing"), L"drawing");
+    const DwgFontSetting dwg_font_setting = ResolveDwgFontFromDrawingDtl(drawing, drawing_model, log_sink);
     LogLine(log_sink,
-            "drawing-export begin format=%s dwg_mode=%d color_map=%d drawing=%s sheets=%d dir=%s",
+            "drawing-export begin format=%s dwg_mode=%d color_map=%d drawing=%s sheets=%d dwg_font=%s dwg_font_source=%s dir=%s",
             DrawingExportFormatLogName(request.format),
             static_cast<int>(request.dwg_mode),
             request.enable_official_color_mapping ? 1 : 0,
             autobbox::common::WToA(drawing_stem.c_str()).c_str(),
             sheets,
+            autobbox::common::WToA(dwg_font_setting.font_file.c_str()).c_str(),
+            dwg_font_setting.source.c_str(),
             autobbox::common::WToA(result.output_dir.c_str()).c_str());
 
     const bool dxf_dwg_mapping_applicable =
@@ -941,6 +1444,19 @@ core::DrawingExportResult ExecuteDrawingExportTask(
                 const std::wstring path =
                     UniqueOutputPath(result.output_dir, stem, DrawingExportFormatExtension(request.format));
                 st = ExportPerSheet2dFile(drawing, PRO_DWG_FILE, path, sheet, log_sink);
+                if (st == PRO_TK_NO_ERROR) {
+                    const std::vector<std::wstring> layout_target_names = {SheetLayoutName(drawing, sheet)};
+                    const ProError st_postprocess = RunDwgLayoutRenamer(
+                        path,
+                        layout_target_names,
+                        result.output_dir,
+                        stem,
+                        dwg_font_setting,
+                        log_sink);
+                    if (st_postprocess != PRO_TK_NO_ERROR) {
+                        st = st_postprocess;
+                    }
+                }
                 RecordExport(result, path, sheet, st);
             }
             const ProError st_restore_sheet = ProDrawingCurrentSheetSet(drawing, original_sheet);
@@ -953,12 +1469,51 @@ core::DrawingExportResult ExecuteDrawingExportTask(
                 result.status = st_restore_sheet;
             }
         } else {
-            const std::wstring stem = ContainsAllSheets(selected_sheets, sheets)
+            const bool exporting_all_sheets = ContainsAllSheets(selected_sheets, sheets);
+            const std::wstring stem = exporting_all_sheets
                                           ? drawing_stem
                                           : SanitizeFileStem(drawing_stem + L"_selected", L"drawing_selected");
             const std::wstring path =
                 UniqueOutputPath(result.output_dir, stem, DrawingExportFormatExtension(request.format));
-            st = Export2dSelectedSheetsFile(drawing_model, PRO_DWG_FILE, path, selected_sheets, log_sink);
+            LogLine(log_sink,
+                    "drawing-export dwg multi-layout all_sheets=%d selected_count=%d",
+                    exporting_all_sheets ? 1 : 0,
+                    static_cast<int>(selected_sheets.size()));
+            std::vector<DwgLayoutSheetName> layout_names =
+                CollectDwgLayoutSheetNames(drawing, selected_sheets, log_sink);
+            const std::vector<std::wstring> layout_target_names = ExtractLayoutTargetNames(layout_names);
+            {
+                ScopedDwgLayoutSheetNames layout_name_guard(drawing, std::move(layout_names), log_sink);
+                const ProError st_layout_names = layout_name_guard.Apply();
+                if (st_layout_names != PRO_TK_NO_ERROR) {
+                    LogLine(log_sink,
+                            "drawing-export dwg multi-layout sheet-name-apply-warning status=%d action=continue-export",
+                            static_cast<int>(st_layout_names));
+                }
+                if (exporting_all_sheets) {
+                    st = Export2dFile(
+                        drawing_model,
+                        PRO_DWG_FILE,
+                        path,
+                        PRO2DEXPORT_ALL,
+                        0,
+                        log_sink);
+                } else {
+                    st = Export2dSelectedSheetsFile(drawing_model, PRO_DWG_FILE, path, selected_sheets, log_sink);
+                }
+            }
+            if (st == PRO_TK_NO_ERROR) {
+                const ProError st_rename = RunDwgLayoutRenamer(
+                    path,
+                    layout_target_names,
+                    result.output_dir,
+                    drawing_stem,
+                    dwg_font_setting,
+                    log_sink);
+                if (st_rename != PRO_TK_NO_ERROR) {
+                    st = st_rename;
+                }
+            }
             RecordExport(result, path, 0, st);
         }
     } else {

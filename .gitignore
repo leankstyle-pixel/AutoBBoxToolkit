@@ -1,5 +1,6 @@
-# Build outputs and local packaging
+﻿# Build outputs and local packaging
 /build/
+/build_verify/
 /deploy/
 /runtime/
 /package/

@@ -2,12 +2,14 @@
 
 #include "autobbox/application/drawing_page_scale_sync.h"
 #include "autobbox/main/plugin_runtime_bridge.h"
+#include "autobbox/ui/drawing_scale_sync_dialog.h"
 
 #include <ProDrawing.h>
 #include <ProMdl.h>
 #include <ProToolkit.h>
 #include <ProWindows.h>
 
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 
@@ -111,13 +113,51 @@ int RunPluginDrawingScaleSyncTask(const PluginDrawingScaleSyncRuntime &runtime)
         return 0;
     }
 
+    int sheet_count = 0;
+    const ProError st_sheet_count = ProDrawingSheetsCount(drawing, &sheet_count);
+    if (st_sheet_count != PRO_TK_NO_ERROR || sheet_count <= 0) {
+        LogLine("FAIL page-scale-sync reason=sheet-count status=%d count=%d",
+                static_cast<int>(st_sheet_count),
+                sheet_count);
+        OpenPluginReportLog();
+        return 0;
+    }
+
+    double current_page_scale = 0.0;
+    const ProError st_scale = ProDrawingScaleGet(drawing, nullptr, sheet, &current_page_scale);
+    if (st_scale != PRO_TK_NO_ERROR || current_page_scale <= 0.0 || !std::isfinite(current_page_scale)) {
+        LogLine("FAIL page-scale-sync reason=current-page-scale status=%d sheet=%d value=%.6f",
+                static_cast<int>(st_scale),
+                sheet,
+                current_page_scale);
+        OpenPluginReportLog();
+        return 0;
+    }
+
+    autobbox::application::DrawingPageScaleSyncOptions options = {};
+    options.scope = autobbox::application::DrawingPageScaleSyncScope::CurrentSheet;
+    options.current_sheet = sheet;
+    options.sheet_count = sheet_count;
+    options.target_scale = current_page_scale;
+
+    bool cancelled = false;
+    if (!autobbox::ui::PromptDrawingScaleSyncOptionsDialog(
+            options,
+            cancelled,
+            [](const std::string &line) { LogPluginReportLine(line); })) {
+        LogLine("SKIP page-scale-sync reason=%s", cancelled ? "dialog-cancelled" : "dialog-failed");
+        OpenPluginReportLog();
+        return 0;
+    }
+
     const autobbox::application::DrawingPageScaleSyncSummary summary =
         autobbox::application::ExecuteDrawingPageScaleSyncTask(
             drawing,
-            sheet,
+            options,
             [](const std::string &line) { LogPluginReportLine(line); });
 
-    if (summary.page_scale_valid && summary.views_on_sheet > 0) {
+    if (summary.page_scale_valid &&
+        (summary.views_on_sheet > 0 || summary.sheet_scale_ok_count > 0)) {
         RefreshCurrentWindow();
     }
 

@@ -255,6 +255,39 @@ InstanceResolveState ResolveImmediateGenericModel(ProMdl mdl, ProMdl *immediate_
     return InstanceResolveState::Unresolved;
 }
 
+bool FamtableInstanceItemHasExplicitValue(ProFaminstance *inst, ProFamtableItem *item)
+{
+    if (inst == nullptr || item == nullptr) {
+        return false;
+    }
+
+    ProBoolean is_default = PRO_B_FALSE;
+    if (ProFaminstanceFamtableItemIsDefault(inst, item, &is_default) == PRO_TK_NO_ERROR) {
+        return is_default != PRO_B_TRUE;
+    }
+
+    ProParamvalue oldv;
+    std::memset(&oldv, 0, sizeof(oldv));
+    return ProFaminstanceValueGet(inst, item, &oldv) == PRO_TK_NO_ERROR;
+}
+
+void SyncLoadedInstanceParameterCache(ProMdl inst_mdl,
+                                      const wchar_t *param_name,
+                                      ProParamvalue *value)
+{
+    if (inst_mdl == nullptr || param_name == nullptr || value == nullptr) {
+        return;
+    }
+
+    ProModelitem owner = MdlAsModelitem(inst_mdl);
+    ProParameter param;
+    ProName pname = {0};
+    CopyWStr(pname, param_name);
+    if (ProParameterInit(&owner, pname, &param) == PRO_TK_NO_ERROR) {
+        ProParameterValueWithUnitsSet(&param, value, nullptr);
+    }
+}
+
 ProError SetStringOnCurrentInstanceFamtableLevel(ProMdl inst_mdl,
                                                  ProMdl immediate_generic,
                                                  const wchar_t *param_name,
@@ -300,9 +333,7 @@ ProError SetStringOnCurrentInstanceFamtableLevel(ProMdl inst_mdl,
     }
 
     if (!recompute) {
-        ProParamvalue oldv;
-        std::memset(&oldv, 0, sizeof(oldv));
-        if (ProFaminstanceValueGet(&inst, &item, &oldv) == PRO_TK_NO_ERROR) {
+        if (FamtableInstanceItemHasExplicitValue(&inst, &item)) {
             return PRO_TK_NO_CHANGE;
         }
     }
@@ -312,7 +343,13 @@ ProError SetStringOnCurrentInstanceFamtableLevel(ProMdl inst_mdl,
     ProParamvalue pv;
     std::memset(&pv, 0, sizeof(pv));
     ProParamvalueSet(&pv, sval, PRO_PARAM_STRING);
-    return ProFaminstanceValueSet(&inst, &item, &pv);
+    st = ProFaminstanceValueSet(&inst, &item, &pv);
+    if (!IsWriteSuccess(st)) {
+        return st;
+    }
+
+    SyncLoadedInstanceParameterCache(inst_mdl, param_name, &pv);
+    return st;
 }
 
 ProError SetDoubleOnCurrentInstanceFamtableLevel(ProMdl inst_mdl,
@@ -360,9 +397,7 @@ ProError SetDoubleOnCurrentInstanceFamtableLevel(ProMdl inst_mdl,
     }
 
     if (!recompute) {
-        ProParamvalue oldv;
-        std::memset(&oldv, 0, sizeof(oldv));
-        if (ProFaminstanceValueGet(&inst, &item, &oldv) == PRO_TK_NO_ERROR) {
+        if (FamtableInstanceItemHasExplicitValue(&inst, &item)) {
             return PRO_TK_NO_CHANGE;
         }
     }
@@ -370,7 +405,13 @@ ProError SetDoubleOnCurrentInstanceFamtableLevel(ProMdl inst_mdl,
     ProParamvalue pv;
     std::memset(&pv, 0, sizeof(pv));
     ProParamvalueSet(&pv, &value, PRO_PARAM_DOUBLE);
-    return ProFaminstanceValueSet(&inst, &item, &pv);
+    st = ProFaminstanceValueSet(&inst, &item, &pv);
+    if (!IsWriteSuccess(st)) {
+        return st;
+    }
+
+    SyncLoadedInstanceParameterCache(inst_mdl, param_name, &pv);
+    return st;
 }
 
 } // namespace

@@ -41,6 +41,25 @@ bool IsGenericByFamtable(ProMdl mdl)
     return HasFamtable(mdl);
 }
 
+std::wstring FormatDimensionValue(double value)
+{
+    if (value < 0.0) {
+        value = 0.0;
+    }
+
+    wchar_t buffer[64] = {0};
+    std::swprintf(buffer, sizeof(buffer) / sizeof(buffer[0]) - 1, L"%.2f", value);
+
+    std::wstring text(buffer);
+    while (!text.empty() && text.back() == L'0') {
+        text.pop_back();
+    }
+    if (!text.empty() && text.back() == L'.') {
+        text.pop_back();
+    }
+    return text;
+}
+
 struct BoundsAccumulator {
     bool have = false;
     double min[3] = {0.0, 0.0, 0.0};
@@ -472,27 +491,8 @@ bool ComputeVolumeM3(ProMdl mdl, double &volume_out)
 
 std::wstring IntLwhString(double length, double width, double height)
 {
-    long long li = llround(length);
-    long long wi = llround(width);
-    long long hi = llround(height);
-    if (li < 0) {
-        li = 0;
-    }
-    if (wi < 0) {
-        wi = 0;
-    }
-    if (hi < 0) {
-        hi = 0;
-    }
-
-    wchar_t buffer[128] = {0};
-    std::swprintf(buffer,
-                  sizeof(buffer) / sizeof(buffer[0]) - 1,
-                  L"%lldX%lldX%lld",
-                  li,
-                  wi,
-                  hi);
-    return std::wstring(buffer);
+    return FormatDimensionValue(length) + L"x" + FormatDimensionValue(width) + L"x" +
+           FormatDimensionValue(height);
 }
 
 std::wstring FormatVol(double value)

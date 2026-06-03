@@ -84,11 +84,24 @@ std::wstring MakeSplitCandidateLabel(const core::SplitCandidate &cand, bool curr
 
 struct TraverseCtx {
     std::vector<ProMdl> targets;
-    std::unordered_set<std::uintptr_t> seen;
+    std::unordered_set<std::wstring> seen;
     bool want_parts = true;
     bool want_asms = true;
     bool top_level_only = false;
 };
+
+std::wstring TargetDedupKey(ProMdl mdl)
+{
+    if (mdl == nullptr) {
+        return std::wstring();
+    }
+
+    ProName name = {0};
+    ProMdlNameGet(mdl, name);
+    return std::to_wstring(static_cast<int>(autobbox::creo::ModelType(mdl))) +
+           L":" +
+           std::wstring(name);
+}
 
 bool AcceptType(ProMdl mdl, const TraverseCtx &ctx)
 {
@@ -117,8 +130,8 @@ ProError CompVisitAction(ProAsmcomppath *p_path,
         return PRO_TK_NO_ERROR;
     }
 
-    const std::uintptr_t key = reinterpret_cast<std::uintptr_t>(mdl);
-    if (ctx->seen.insert(key).second) {
+    const std::wstring key = TargetDedupKey(mdl);
+    if (!key.empty() && ctx->seen.insert(key).second) {
         ctx->targets.push_back(mdl);
     }
     return PRO_TK_NO_ERROR;
@@ -265,7 +278,7 @@ std::vector<ProMdl> CollectTargetsFromCurrentModel(ProBoolean parts,
     ctx.top_level_only = (top_level_only == PRO_B_TRUE);
     if (!ctx.top_level_only && ctx.want_asms) {
         ctx.targets.push_back(current);
-        ctx.seen.insert(reinterpret_cast<std::uintptr_t>(current));
+        ctx.seen.insert(TargetDedupKey(current));
     }
 
     ProSolidDispCompVisit(reinterpret_cast<ProSolid>(current), CompVisitAction, nullptr, &ctx);
